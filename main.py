@@ -1,7 +1,5 @@
 import sys
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                             QTableWidget, QTableWidgetItem, QDateEdit, QMessageBox)
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QDateEdit, QMessageBox
 from PyQt5.QtCore import QDate
 import sqlite3
 import matplotlib.pyplot as plt
@@ -14,12 +12,22 @@ DB_NAME = "carteira.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS carteira (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        moeda TEXT,
-                        valor_unit REAL,
-                        quantidade REAL,
-                        data TEXT)''')
+    # Criando a tabela, se ela não existir
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS carteira (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            moeda TEXT,
+            valor_unit REAL,
+            quantidade REAL,
+            data TEXT,
+            valor_total REAL
+        )
+    ''')
+    # Tentando adicionar a coluna 'valor_total' caso não tenha sido criada na tabela existente
+    try:
+        cursor.execute('ALTER TABLE carteira ADD COLUMN valor_total REAL')
+    except sqlite3.OperationalError:
+        pass  # Se a coluna já existir, ignoramos o erro
     conn.commit()
     conn.close()
 
@@ -59,14 +67,18 @@ class MainWindow(QMainWindow):
 
         # Tabela de exibição
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["ID", "Moeda", "Valor Unit.", "Quantidade", "Data"])
+        self.table.setColumnCount(6)  # Agora temos 6 colunas
+        self.table.setHorizontalHeaderLabels(["ID", "Moeda", "Valor Unit.", "Quantidade", "Data", "Valor Total"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.cellClicked.connect(self.update_chart)
 
         # Botão de exclusão
         self.delete_button = QPushButton("Excluir Selecionado")
         self.delete_button.clicked.connect(self.delete_entry)
+
+        # Botão sair
+        self.exit_button = QPushButton("Sair")
+        self.exit_button.clicked.connect(self.close)
 
         # Gráfico
         self.figure, self.ax = plt.subplots()
@@ -76,6 +88,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(form_layout)
         main_layout.addWidget(self.table)
         main_layout.addWidget(self.delete_button)
+        main_layout.addWidget(self.exit_button)
         main_layout.addWidget(self.canvas)
 
         # Widget central
@@ -92,6 +105,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Erro", "Valor unitário e quantidade devem ser numéricos.")
             return
         data = self.data_input.date().toString("yyyy-MM-dd")
+        valor_total = valor_unit * quantidade  # Calculando o valor total
 
         if not moeda:
             QMessageBox.warning(self, "Erro", "O campo moeda não pode estar vazio.")
@@ -99,8 +113,8 @@ class MainWindow(QMainWindow):
 
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO carteira (moeda, valor_unit, quantidade, data) VALUES (?, ?, ?, ?)",
-                       (moeda, valor_unit, quantidade, data))
+        cursor.execute("INSERT INTO carteira (moeda, valor_unit, quantidade, data, valor_total) VALUES (?, ?, ?, ?, ?)",
+                       (moeda, valor_unit, quantidade, data, valor_total))
         conn.commit()
         conn.close()
 
@@ -146,11 +160,23 @@ class MainWindow(QMainWindow):
         moeda = self.table.item(selected_row, 1).text()
         valor_unit = float(self.table.item(selected_row, 2).text())
         quantidade = float(self.table.item(selected_row, 3).text())
-        valor_total = valor_unit * quantidade
+        valor_total = self.table.item(selected_row, 5).text()
+
+        # Verificar se o valor_total existe e é um número
+        if valor_total:
+            valor_total = float(valor_total)
+        else:
+            valor_total = valor_unit * quantidade  # Caso não tenha, calculamos novamente
 
         self.ax.clear()
         self.ax.bar(["Valor Total (R$)"], [valor_total], color=['blue'])
-        self.ax.set_title(f"Valor Total em Reais de {moeda}")
+
+        # Ajustar o título do gráfico para não sobrepor a label
+        self.ax.set_title(f"Valor Total em Reais de {moeda}", pad=20)
+
+        # Adicionar label no gráfico
+        self.ax.text(0, valor_total + valor_total * 0.05, f'R$ {valor_total:.2f}', ha='center', va='bottom', fontsize=12, color='blue')
+    
         self.canvas.draw()
 
     def clear_form(self):
